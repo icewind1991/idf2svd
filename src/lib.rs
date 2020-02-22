@@ -24,17 +24,17 @@ const REPLACEMENTS: &'static [(&'static str, &'static str)] = &[
 ];
 
 /* Regex's to find all the peripheral addresses */
-pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:ADDR)?[\s*]+0x([0-9a-fA-F]+)";
-pub const REG_DEF: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)[\s*]+\((?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:ADDR)? \+ (.*)\)";
+pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:A?DDR)?[\s*]+0x([0-9a-fA-F]+)";
+pub const REG_DEF: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)[\s*]+\((?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:A?DDR)? \+ (.*)\)";
 pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:ADDRESS|U)[\s*]+(?:0x)?([0-9a-fA-F]+)";
 pub const REG_DEF_INDEX: &'static str =
-    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)\(i\)[\s*]+\((?:DR_REG|REG|PERIPHS)_([0-9A-Za-z_]+)_BASE(?:ADDR)?[\s*]*\(i\) \+ (.*?)\)";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)\(i\)[\s*]+\((?:DR_REG|REG|PERIPHS)_([0-9A-Za-z_]+)_BASE(?:A?DDR)?[\s*]*\(i\) \+ (.*?)\)";
 pub const REG_DEFINE_MASK: &'static str =
     r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+|\(?BIT\(?[0-9]+\)?)\)?\)?";
 pub const REG_DEFINE_SHIFT: &'static str =
     r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:S|s)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+)\)?";
 pub const REG_DEFINE_SKIP: &'static str =
-    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:M|V|MASK)[\s*]+(\(|0x)";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:M|V)[\s*]+(\(|0x)";
 pub const SINGLE_BIT: &'static str = r"BIT\(?([0-9]+)\)?";
 pub const INTERRUPTS: &'static str =
     r"\#define[\s]ETS_([0-9A-Za-z_/]+)_SOURCE[\s]+([0-9]+)/\*\*<\s([0-9A-Za-z_/\s,]+)\*/";
@@ -381,7 +381,7 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                     continue;
                                 } else {
                                     println!("Failed to match reg shift at {}:{} ('{}')", name, i, line);
-                                    state = State::FindReg;
+                                    state = State::End(pname.clone(), reg.clone());
                                 }
                             }
                             break; // next line
