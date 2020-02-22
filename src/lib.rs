@@ -1,23 +1,45 @@
 use regex::Regex;
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, DirEntry};
 use std::io::prelude::*;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
+// make the header a bit more easy to handle
+const REPLACEMENTS: &'static [(&'static str, &'static str)] = &[
+    ("PERIPHS_IO_MUX ", "PERIPHS_IO_MUX_BASE "),
+    ("SLC_CONF0", "SLC_CONF0_REG"),
+    ("SLC_INT_RAW", "SLC_INT_RAW_REG"),
+    ("SLC_INT_STATUS", "SLC_INT_STATUS_REG"),
+    ("SLC_INT_ENA", "SLC_INT_ENA_REG"),
+    ("SLC_INT_CLR", "SLC_INT_CLR_REG"),
+    ("SLC_RX_STATUS", "SLC_RX_STATUS_REG"),
+    ("SLC_RX_FIFO_PUSH", "SLC_RX_FIFO_PUSH_REG"),
+    ("SLC_TX_STATUS", "SLC_TX_STATUS_REG"),
+    ("SLC_TX_FIFO_POP", "SLC_TX_FIFO_POP_REG"),
+    ("SLC_RX_LINK", "SLC_RX_LINK_REG"),
+    ("RTC_STORE0", "RTC_STORE0_REG"),
+    ("RTC_STATE1", "RTC_STATE1_REG"),
+    ("RTC_STATE2", "RTC_STATE2_REG"),
+];
+
 /* Regex's to find all the peripheral addresses */
-pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|PERIPHS)_(.*)_BASE(?:ADDR)?[\s*]+0x([0-9a-fA-F]+)";
-pub const REG_DEF: &'static str = r"\#define[\s*]+([^\s*]+)_REG[\s*]+\(DR_REG_(.*)_BASE \+ (.*)\)";
-pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+([^\s*]+)_ADDRESS[\s*]+0x([0-9a-fA-F]+)";
+pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:ADDR)?[\s*]+0x([0-9a-fA-F]+)";
+pub const REG_DEF: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)[\s*]+\((?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:ADDR)? \+ (.*)\)";
+pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:ADDRESS|U)[\s*]+(?:0x)?([0-9a-fA-F]+)";
 pub const REG_DEF_INDEX: &'static str =
-    r"\#define[\s*]+([^\s*]+)_REG\(i\)[\s*]+\(REG_([0-9A-Za-z_]+)_BASE[\s*]*\(i\) \+ (.*?)\)";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)\(i\)[\s*]+\((?:DR_REG|REG|PERIPHS)_([0-9A-Za-z_]+)_BASE(?:ADDR)?[\s*]*\(i\) \+ (.*?)\)";
 pub const REG_DEFINE_MASK: &'static str =
-    r"\#define[\s*]+([^\s*]+)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+|BIT[0-9]+)\)?";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+|\(?BIT\(?[0-9]+\)?)\)?\)?";
 pub const REG_DEFINE_SHIFT: &'static str =
-    r"\#define[\s*]+([^\s*]+)_(?:S|s)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+)\)?";
-pub const SINGLE_BIT: &'static str = r"BIT([0-9]+)";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:S|s)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+)\)?";
+pub const REG_DEFINE_SKIP: &'static str =
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:M|V)[\s*]+(\(|0x)";
+pub const SINGLE_BIT: &'static str = r"BIT\(?([0-9]+)\)?";
 pub const INTERRUPTS: &'static str =
     r"\#define[\s]ETS_([0-9A-Za-z_/]+)_SOURCE[\s]+([0-9]+)/\*\*<\s([0-9A-Za-z_/\s,]+)\*/";
+pub const REG_IFDEF: &'static str = r"#ifn?def.*";
+pub const REG_ENDIF: &'static str = r"#endif";
 
 #[derive(Debug, Default, Clone)]
 pub struct Peripheral {
@@ -125,6 +147,7 @@ enum State {
     FindBitFieldMask(String, Register),
     FindBitFieldShift(String, Register, u32),
     FindBitFieldSkipShift(String, Register),
+    AssumeFullRegister(String, Register),
     CheckEnd(String, Register),
 }
 
@@ -138,7 +161,9 @@ fn add_base_addr(header: &str, peripherals: &mut HashMap<String, Peripheral>) {
         p.address = u32::from_str_radix(address, 16).unwrap();
         p.description = peripheral.to_string();
 
-        peripherals.insert(peripheral.to_string(), p);
+        if !peripherals.contains_key(peripheral) {
+            peripherals.insert(peripheral.to_string(), p);
+        }
     }
 }
 
@@ -159,6 +184,9 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
     let re_reg_define_shift = Regex::new(REG_DEFINE_SHIFT).unwrap();
     let re_interrupts = Regex::new(INTERRUPTS).unwrap();
     let re_single_bit = Regex::new(SINGLE_BIT).unwrap();
+    let re_reg_skip = Regex::new(REG_DEFINE_SKIP).unwrap();
+    let re_ifdef = Regex::new(REG_IFDEF).unwrap();
+    let re_endif = Regex::new(REG_ENDIF).unwrap();
 
     let soc_h = file_to_string(&filname);
 
@@ -180,30 +208,40 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
        These blocks are identical, so we need to do some post processing to properly index
        and offset these
     */
-    peripherals.insert("I2C".to_string(), Peripheral::default());
-    peripherals.insert("SPI".to_string(), Peripheral::default());
-    peripherals.insert("TIMG".to_string(), Peripheral::default());
-    peripherals.insert("MCPWM".to_string(), Peripheral::default());
-    peripherals.insert("UHCI".to_string(), Peripheral::default());
+    // peripherals.insert("I2C".to_string(), Peripheral::default());
+    // peripherals.insert("SPI".to_string(), Peripheral::default());
+    // peripherals.insert("TIMG".to_string(), Peripheral::default());
+    // peripherals.insert("MCPWM".to_string(), Peripheral::default());
+    // peripherals.insert("UHCI".to_string(), Peripheral::default());
 
     add_base_addr(&soc_h, &mut peripherals);
 
     std::fs::read_dir(path)
         .unwrap()
         .filter_map(Result::ok)
-        .filter(|f| f.path().to_str().unwrap().ends_with("_register.h"))
+        .filter(|f| f.path().to_str().unwrap().ends_with("_register.h") || f.file_name().to_str().unwrap() == "eagle_soc.h")
         .for_each(|f| {
             let name = f.path();
             let name = name.to_str().unwrap();
             // let mut buffer = vec![];
-            let file_data = file_to_string(name);
+            let mut file_data = file_to_string(name);
+            for (search, replace) in REPLACEMENTS {
+                file_data = file_data.replace(search, replace);
+            }
 
             add_base_addr(&file_data, &mut peripherals);
 
             // println!("Searching {}", name);
             let mut something_found = false;
             let mut state = State::FindReg;
+            let mut in_ifdef = false;
             for (i, line) in file_data.lines().enumerate() {
+                if re_ifdef.is_match(line) {
+                    continue;
+                } else if re_endif.is_match(line) {
+                    continue;
+                }
+
                 loop {
                     match state {
                         State::FindReg => {
@@ -257,7 +295,28 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                             }
                             break; // next line
                         }
+                        State::AssumeFullRegister(ref mut pname, ref mut reg) => {
+                            something_found = true;
+                            // assume full 32bit wide field
+                            let bitfield = BitField {
+                                name: "Register".to_string(),
+                                bits: Bits::Range(0..=31),
+                                ..Default::default()
+                            };
+                            reg.bit_fields.push(bitfield);
+
+                            if let Some(p) = peripherals.get_mut(&pname.to_string()) {
+                                p.registers.push(reg.clone());
+                            } else {
+                                invalid_peripherals.push(pname.to_string());
+                            }
+                            state = State::FindReg;
+                        }
                         State::FindBitFieldMask(ref mut pname, ref mut reg) => {
+                            if re_reg_offset.is_match(line) {
+                                state = State::AssumeFullRegister(pname.clone(), reg.clone());
+                                continue;
+                            }
                             if let Some(m) = re_reg_define.captures(line) {
                                 something_found = true;
                                 let define_name = &m[1];
@@ -281,12 +340,20 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                     state = State::FindBitFieldShift(pname.clone(), reg.clone(), mask);
                                 }
                             } else {
-                                println!("Failed to match reg mask at {}:{}", name, i);
-                                state = State::FindReg;
+                                if reg.bit_fields.is_empty() {
+                                    state = State::AssumeFullRegister(pname.clone(), reg.clone());
+                                    continue;
+                                } else {
+                                    println!("Failed to match reg mask at {}:{}", name, i);
+                                    state = State::FindReg;
+                                }
                             }
                             break; // next line
                         }
                         State::FindBitFieldShift(ref mut pname, ref mut reg, ref mut mask) => {
+                            if re_reg_skip.is_match(line) {
+                                break;
+                            }
                             if let Some(m) = re_reg_define_shift.captures(line) {
                                 let define_name = &m[1];
                                 let value = &m[2];
@@ -296,7 +363,7 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                         name: define_name.to_string(),
                                         bits: match mask.count_ones() {
                                             1 => Bits::Single(shift),
-                                            bits => Bits::Range(shift..=shift + bits as u8)
+                                            bits => Bits::Range(shift..=shift + (bits - 1) as u8)
                                         },
                                         ..Default::default()
                                     };
@@ -304,14 +371,21 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                     state = State::CheckEnd(pname.clone(), reg.clone())
                                 }
                             } else {
-                                println!("Failed to match reg shift at {}:{} ('{}')", name, i, line);
-                                state = State::FindReg;
+                                if reg.bit_fields.is_empty() {
+                                    state = State::AssumeFullRegister(pname.clone(), reg.clone());
+                                    continue;
+                                } else {
+                                    println!("Failed to match reg shift at {}:{} ('{}')", name, i, line);
+                                    state = State::FindReg;
+                                }
                             }
                             break; // next line
                         }
                         State::FindBitFieldSkipShift(ref mut pname, ref mut reg) => {
                             state = State::CheckEnd(pname.clone(), reg.clone());
-                            break;
+                            if re_reg_define_shift.is_match(line) {
+                                break;
+                            }
                         }
                         State::CheckEnd(ref mut pname, ref mut reg) => {
                             if line.is_empty() {
