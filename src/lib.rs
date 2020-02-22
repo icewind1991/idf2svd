@@ -6,15 +6,16 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 /* Regex's to find all the peripheral addresses */
-pub const REG_BASE: &'static str = r"\#define[\s*]+DR_REG_(.*)_BASE[\s*]+0x([0-9a-fA-F]+)";
+pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|PERIPHS)_(.*)_BASE(?:ADDR)?[\s*]+0x([0-9a-fA-F]+)";
 pub const REG_DEF: &'static str = r"\#define[\s*]+([^\s*]+)_REG[\s*]+\(DR_REG_(.*)_BASE \+ (.*)\)";
+pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+([^\s*]+)_ADDRESS[\s*]+0x([0-9a-fA-F]+)";
 pub const REG_DEF_INDEX: &'static str =
     r"\#define[\s*]+([^\s*]+)_REG\(i\)[\s*]+\(REG_([0-9A-Za-z_]+)_BASE[\s*]*\(i\) \+ (.*?)\)";
-pub const REG_BITS: &'static str =
-    r"\#define[\s*]+([^\s*]+)_(S|V)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+)\)?";
-pub const REG_BIT_INFO: &'static str =
-    r"/\*[\s]+([0-9A-Za-z_]+)[\s]+:[\s]+([0-9A-Za-z_/]+)[\s]+;bitpos:\[(.*)\][\s];default:[\s]+(.*)[\s];[\s]\*/";
-pub const REG_DESC: &'static str = r"\*description:\s(.*[\n|\r|\r\n]?.*)\*/";
+pub const REG_DEFINE_MASK: &'static str =
+    r"\#define[\s*]+([^\s*]+)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+|BIT[0-9]+)\)?";
+pub const REG_DEFINE_SHIFT: &'static str =
+    r"\#define[\s*]+([^\s*]+)_(?:S|s)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+)\)?";
+pub const SINGLE_BIT: &'static str = r"BIT([0-9]+)";
 pub const INTERRUPTS: &'static str =
     r"\#define[\s]ETS_([0-9A-Za-z_/]+)_SOURCE[\s]+([0-9]+)/\*\*<\s([0-9A-Za-z_/\s,]+)\*/";
 
@@ -24,6 +25,7 @@ pub struct Peripheral {
     pub address: u32,
     pub registers: Vec<Register>,
 }
+
 #[derive(Clone, Debug, Default)]
 pub struct Interrupt {
     pub name: String,
@@ -120,9 +122,24 @@ impl FromStr for Type {
 
 enum State {
     FindReg,
-    FindBitFieldInfo(String, Register),
-    FindDescription(String, Register, BitField),
+    FindBitFieldMask(String, Register),
+    FindBitFieldShift(String, Register, u32),
+    FindBitFieldSkipShift(String, Register),
     CheckEnd(String, Register),
+}
+
+fn add_base_addr(header: &str, peripherals: &mut HashMap<String, Peripheral>) {
+    let re_base = Regex::new(REG_BASE).unwrap();
+    /* Peripheral base addresses */
+    for captures in re_base.captures_iter(header) {
+        let peripheral = &captures[1];
+        let address = &captures[2];
+        let mut p = Peripheral::default();
+        p.address = u32::from_str_radix(address, 16).unwrap();
+        p.description = peripheral.to_string();
+
+        peripherals.insert(peripheral.to_string(), p);
+    }
 }
 
 pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
@@ -130,17 +147,18 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
     let mut invalid_peripherals = vec![];
     let mut invalid_files = vec![];
     let mut invalid_registers = vec![];
-    let mut invalid_bit_fields = vec![];
+    // let mut invalid_bit_fields = vec![];
 
     let mut interrupts = vec![];
 
-    let filname = path.to_owned() + "soc.h";
-    let re_base = Regex::new(REG_BASE).unwrap();
+    let filname = path.to_owned() + "eagle_soc.h";
     let re_reg = Regex::new(REG_DEF).unwrap();
     let re_reg_index = Regex::new(REG_DEF_INDEX).unwrap();
-    let re_reg_desc = Regex::new(REG_DESC).unwrap();
-    let re_reg_bit_info = Regex::new(REG_BIT_INFO).unwrap();
+    let re_reg_offset = Regex::new(REG_DEF_OFFSET).unwrap();
+    let re_reg_define = Regex::new(REG_DEFINE_MASK).unwrap();
+    let re_reg_define_shift = Regex::new(REG_DEFINE_SHIFT).unwrap();
     let re_interrupts = Regex::new(INTERRUPTS).unwrap();
+    let re_single_bit = Regex::new(SINGLE_BIT).unwrap();
 
     let soc_h = file_to_string(&filname);
 
@@ -168,26 +186,20 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
     peripherals.insert("MCPWM".to_string(), Peripheral::default());
     peripherals.insert("UHCI".to_string(), Peripheral::default());
 
-    /* Peripheral base addresses */
-    for captures in re_base.captures_iter(soc_h.as_str()) {
-        let peripheral = &captures[1];
-        let address = &captures[2];
-        let mut p = Peripheral::default();
-        p.address = u32::from_str_radix(address, 16).unwrap();
-        p.description = peripheral.to_string();
-
-        peripherals.insert(peripheral.to_string(), p);
-    }
+    add_base_addr(&soc_h, &mut peripherals);
 
     std::fs::read_dir(path)
         .unwrap()
         .filter_map(Result::ok)
-        .filter(|f| f.path().to_str().unwrap().ends_with("_reg.h"))
+        .filter(|f| f.path().to_str().unwrap().ends_with("_register.h"))
         .for_each(|f| {
             let name = f.path();
             let name = name.to_str().unwrap();
-            let mut buffer = vec![];
+            // let mut buffer = vec![];
             let file_data = file_to_string(name);
+
+            add_base_addr(&file_data, &mut peripherals);
+
             // println!("Searching {}", name);
             let mut something_found = false;
             let mut state = State::FindReg;
@@ -210,7 +222,7 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                     r.description = reg_name.to_string();
                                     r.name = reg_name.to_string();
                                     r.address = addr;
-                                    state = State::FindBitFieldInfo(pname.to_string(), r);
+                                    state = State::FindBitFieldMask(pname.to_string(), r);
                                 } else {
                                     invalid_registers.push(reg_name.to_string());
                                 }
@@ -224,58 +236,82 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                     r.name = reg_name.to_string();
                                     r.description = reg_name.to_string();
                                     r.address = addr;
-                                    state = State::FindBitFieldInfo(pname.to_string(), r);
+                                    state = State::FindBitFieldMask(pname.to_string(), r);
+                                } else {
+                                    invalid_registers.push(reg_name.to_string());
+                                }
+                            } else if let Some(m) = re_reg_offset.captures(line) {
+                                let reg_name = &m[1];
+                                let offset = &m[2];
+                                let pname = reg_name.split('_').next().unwrap();
+
+                                if let Ok(addr) = u32::from_str_radix(offset, 16) {
+                                    let mut r = Register::default();
+                                    r.name = reg_name.to_string();
+                                    r.description = reg_name.to_string();
+                                    r.address = addr;
+                                    state = State::FindBitFieldMask(pname.to_string(), r);
                                 } else {
                                     invalid_registers.push(reg_name.to_string());
                                 }
                             }
                             break; // next line
                         }
-                        State::FindBitFieldInfo(ref mut pname, ref mut reg) => {
-                            something_found = true;
-                            if let Some(m) = re_reg_bit_info.captures(line) {
-                                let bf_name = &m[1];
-                                let access_type = &m[2]; // TODO
-                                let bits = &mut m[3].split(':');
-                                let _default_val = &m[4]; // TODO
-                                let bits = match (bits.next(), bits.next()) {
-                                    (Some(h), Some(l)) => {
-                                        Bits::Range(l.parse().unwrap()..=h.parse().unwrap())
-                                    }
-                                    (Some(b), None) => Bits::Single(b.parse().unwrap()),
-                                    _ => {
-                                        // println!("Failed to parse bitpos {}", &m[3]);
-                                        invalid_bit_fields
-                                            .push((bf_name.to_string(), m[3].to_string()));
-                                        continue;
-                                    }
-                                };
+                        State::FindBitFieldMask(ref mut pname, ref mut reg) => {
+                            if let Some(m) = re_reg_define.captures(line) {
+                                something_found = true;
+                                let define_name = &m[1];
+                                let value = &m[2].trim_start_matches("0x");
 
-                                let bf = BitField {
-                                    name: bf_name.to_string(),
-                                    bits,
-                                    type_: Type::from_str(access_type).unwrap_or_else(|s| {
-                                        println!("{}", s);
-                                        Type::default()
-                                    }),
-                                    reset_value: 0,
-                                    ..Default::default()
-                                };
-                                state = State::FindDescription(pname.clone(), reg.clone(), bf);
+                                if let Some(m) = re_single_bit.captures(value) {
+                                    if let Ok(mask_bit) = u8::from_str_radix(&m[1], 10) {
+                                        let bitfield = BitField {
+                                            name: define_name.to_string(),
+                                            bits: Bits::Single(mask_bit),
+                                            ..Default::default()
+                                        };
+                                        reg.bit_fields.push(bitfield);
+                                        state = State::FindBitFieldSkipShift(pname.clone(), reg.clone());
+                                        break;
+                                    } else {
+                                        println!("Failed to single bit match reg mask at {}:{}", name, i);
+                                        state = State::FindReg;
+                                    }
+                                } else if let Ok(mask) = u32::from_str_radix(value, 16) {
+                                    state = State::FindBitFieldShift(pname.clone(), reg.clone(), mask);
+                                }
                             } else {
-                                println!("Failed to match reg info at {}:{}", name, i);
+                                println!("Failed to match reg mask at {}:{}", name, i);
                                 state = State::FindReg;
                             }
                             break; // next line
                         }
-                        State::FindDescription(ref mut pname, ref mut reg, ref mut bf) => {
-                            buffer.push(line);
-                            if let Some(_m) = re_reg_desc.captures(buffer.join("").as_str()) {
-                                buffer.clear();
-                                reg.bit_fields.push(bf.clone()); // add the bit field to the reg
-                                state = State::CheckEnd(pname.clone(), reg.clone());
+                        State::FindBitFieldShift(ref mut pname, ref mut reg, ref mut mask) => {
+                            if let Some(m) = re_reg_define_shift.captures(line) {
+                                let define_name = &m[1];
+                                let value = &m[2];
+
+                                if let Ok(shift) = u8::from_str_radix(value, 10) {
+                                    let bitfield = BitField {
+                                        name: define_name.to_string(),
+                                        bits: match mask.count_ones() {
+                                            1 => Bits::Single(shift),
+                                            bits => Bits::Range(shift..=shift + bits as u8)
+                                        },
+                                        ..Default::default()
+                                    };
+                                    reg.bit_fields.push(bitfield);
+                                    state = State::CheckEnd(pname.clone(), reg.clone())
+                                }
+                            } else {
+                                println!("Failed to match reg shift at {}:{} ('{}')", name, i, line);
+                                state = State::FindReg;
                             }
                             break; // next line
+                        }
+                        State::FindBitFieldSkipShift(ref mut pname, ref mut reg) => {
+                            state = State::CheckEnd(pname.clone(), reg.clone());
+                            break;
                         }
                         State::CheckEnd(ref mut pname, ref mut reg) => {
                             if line.is_empty() {
@@ -290,9 +326,9 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                 }
                                 state = State::FindReg;
                                 break; // next line
-                            } else if re_reg_bit_info.is_match(line) {
-                                // weve found the next bit field in the reg
-                                state = State::FindBitFieldInfo(pname.clone(), reg.clone());
+                            } else if re_reg_define.is_match(line) {
+                                // we've found the next bit field in the reg
+                                state = State::FindBitFieldMask(pname.clone(), reg.clone());
                             } else {
                                 break; // next line
                             }
@@ -330,12 +366,12 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
         );
     }
 
-    if invalid_bit_fields.len() > 0 {
-        println!(
-            "The following bit_fields failed to parse {:?}",
-            invalid_bit_fields
-        );
-    }
+    // if invalid_bit_fields.len() > 0 {
+    //     println!(
+    //         "The following bit_fields failed to parse {:?}",
+    //         invalid_bit_fields
+    //     );
+    // }
 
     // println!("Interrupt information: {:#?}", interrupts);
 

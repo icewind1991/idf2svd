@@ -1,4 +1,4 @@
-pub const SOC_BASE_PATH: &'static str = "esp-idf/components/soc/esp32/include/soc/";
+pub const SOC_BASE_PATH: &'static str = "ESP8266_RTOS_SDK/components/esp8266/include/esp8266/";
 
 use header2svd::{parse_idf, Bits, Peripheral};
 
@@ -17,7 +17,7 @@ fn main() {
 
     let svd = create_svd(peripherals).unwrap();
 
-    let f = BufWriter::new(File::create("esp32.svd").unwrap());
+    let f = BufWriter::new(File::create("esp8266.svd").unwrap());
     svd.encode().unwrap().write(f).unwrap();
 }
 
@@ -92,7 +92,7 @@ fn create_svd(peripherals: HashMap<String, Peripheral>) -> Result<SvdDevice, ()>
     println!("Len {}", svd_peripherals.len());
 
     let cpu = CpuBuilder::default()
-        .name("Xtensa LX6".to_string())
+        .name("Xtensa LX106".to_string())
         .revision("1".to_string())
         .endian(Endian::Little)
         .mpu_present(false)
