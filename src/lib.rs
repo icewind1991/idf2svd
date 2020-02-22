@@ -8,27 +8,19 @@ use std::str::FromStr;
 // make the header a bit more easy to handle
 const REPLACEMENTS: &'static [(&'static str, &'static str)] = &[
     ("PERIPHS_IO_MUX ", "PERIPHS_IO_MUX_BASE "),
-    ("SLC_CONF0", "SLC_CONF0_REG"),
-    ("SLC_INT_RAW", "SLC_INT_RAW_REG"),
-    ("SLC_INT_STATUS", "SLC_INT_STATUS_REG"),
-    ("SLC_INT_ENA", "SLC_INT_ENA_REG"),
-    ("SLC_INT_CLR", "SLC_INT_CLR_REG"),
-    ("SLC_RX_STATUS", "SLC_RX_STATUS_REG"),
-    ("SLC_RX_FIFO_PUSH", "SLC_RX_FIFO_PUSH_REG"),
-    ("SLC_TX_STATUS", "SLC_TX_STATUS_REG"),
-    ("SLC_TX_FIFO_POP", "SLC_TX_FIFO_POP_REG"),
-    ("SLC_RX_LINK", "SLC_RX_LINK_REG"),
     ("RTC_STORE0", "RTC_STORE0_REG"),
     ("RTC_STATE1", "RTC_STATE1_REG"),
     ("RTC_STATE2", "RTC_STATE2_REG"),
     ("(0x60000000 + (i)*0xf00)", "0x60000000") // uart base address
 ];
 const REPLACEMENTS_REGEX: &'static [(&'static str, &'static str)] = &[
-    (r"(UART_(?:[^(]+))\(i\)", "${1}_ADDR")
+    (r"(UART_(?:[^(]+))\(i\)", "${1}_ADDR"),
+    (r"(I2S[^\s]+)[\s]+(\(REG_I2S_BASE \+ )", "${1}_REG $2"),
+    (r"(SLC_[^\s]+)[\s]+(\(REG_SLC_BASE \+ )", "${1}_REG $2")
 ];
 
 /* Regex's to find all the peripheral addresses */
-pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:_?A?DDR)?[\s*]+0x([0-9a-fA-F]+)";
+pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:_?A?DDR)?[\s*]+\(?0x([0-9a-fA-F]+)\)?";
 pub const REG_DEF: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U|ADDR)[\s*]+\((?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:_?A?DDR)? \+ (.*)\)";
 pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:ADDRESS|U|ADDR)[\s*]+(?:0x)?([0-9a-fA-F]+)";
 pub const REG_DEF_INDEX: &'static str =
