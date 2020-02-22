@@ -34,7 +34,7 @@ pub const REG_DEFINE_MASK: &'static str =
 pub const REG_DEFINE_SHIFT: &'static str =
     r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:S|s)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+)\)?";
 pub const REG_DEFINE_SKIP: &'static str =
-    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:M|V)[\s*]+(\(|0x)";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:M|V|MASK)[\s*]+(\(|0x)";
 pub const SINGLE_BIT: &'static str = r"BIT\(?([0-9]+)\)?";
 pub const INTERRUPTS: &'static str =
     r"\#define[\s]ETS_([0-9A-Za-z_/]+)_SOURCE[\s]+([0-9]+)/\*\*<\s([0-9A-Za-z_/\s,]+)\*/";
@@ -149,6 +149,7 @@ enum State {
     FindBitFieldSkipShift(String, Register),
     AssumeFullRegister(String, Register),
     CheckEnd(String, Register),
+    End(String, Register),
 }
 
 fn add_base_addr(header: &str, peripherals: &mut HashMap<String, Peripheral>) {
@@ -313,6 +314,10 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                             state = State::FindReg;
                         }
                         State::FindBitFieldMask(ref mut pname, ref mut reg) => {
+                            if re_reg_skip.is_match(line) {
+                                break;
+                            }
+
                             if re_reg_offset.is_match(line) {
                                 state = State::AssumeFullRegister(pname.clone(), reg.clone());
                                 continue;
@@ -345,7 +350,7 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                                     continue;
                                 } else {
                                     println!("Failed to match reg mask at {}:{}", name, i);
-                                    state = State::FindReg;
+                                    state = State::End(pname.clone(), reg.clone());
                                 }
                             }
                             break; // next line
@@ -389,23 +394,24 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
                         }
                         State::CheckEnd(ref mut pname, ref mut reg) => {
                             if line.is_empty() {
-                                // println!("{} Adding {:#?}", pname, reg);
-                                // were done with this register
-                                if let Some(p) = peripherals.get_mut(&pname.to_string()) {
-                                    p.registers.push(reg.clone());
-                                } else {
-                                    // TODO indexed peripherals wont come up here
-                                    // println!("No periphal called {}", pname.to_string());
-                                    invalid_peripherals.push(pname.to_string());
-                                }
-                                state = State::FindReg;
-                                break; // next line
+                                state = State::End(pname.clone(), reg.clone());
+                                break;
                             } else if re_reg_define.is_match(line) {
                                 // we've found the next bit field in the reg
                                 state = State::FindBitFieldMask(pname.clone(), reg.clone());
                             } else {
                                 break; // next line
                             }
+                        }
+                        State::End(ref mut pname, ref mut reg) => {
+                            if let Some(p) = peripherals.get_mut(&pname.to_string()) {
+                                p.registers.push(reg.clone());
+                            } else {
+                                // TODO indexed peripherals wont come up here
+                                // println!("No periphal called {}", pname.to_string());
+                                invalid_peripherals.push(pname.to_string());
+                            }
+                            state = State::FindReg;
                         }
                     }
                 }
