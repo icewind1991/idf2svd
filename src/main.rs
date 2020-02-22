@@ -14,8 +14,6 @@ use svd_parser::{
 
 fn main() {
     let peripherals = parse_idf(SOC_BASE_PATH);
-    dbg!(&peripherals.keys());
-    dbg!(&peripherals.get("TIMER"));
 
     let svd = create_svd(peripherals).unwrap();
 

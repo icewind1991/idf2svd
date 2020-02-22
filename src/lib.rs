@@ -21,14 +21,18 @@ const REPLACEMENTS: &'static [(&'static str, &'static str)] = &[
     ("RTC_STORE0", "RTC_STORE0_REG"),
     ("RTC_STATE1", "RTC_STATE1_REG"),
     ("RTC_STATE2", "RTC_STATE2_REG"),
+    ("(0x60000000 + (i)*0xf00)", "0x60000000") // uart base address
+];
+const REPLACEMENTS_REGEX: &'static [(&'static str, &'static str)] = &[
+    (r"(UART_(?:[^(]+))\(i\)", "${1}_ADDR")
 ];
 
 /* Regex's to find all the peripheral addresses */
-pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:A?DDR)?[\s*]+0x([0-9a-fA-F]+)";
-pub const REG_DEF: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)[\s*]+\((?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:A?DDR)? \+ (.*)\)";
-pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:ADDRESS|U)[\s*]+(?:0x)?([0-9a-fA-F]+)";
+pub const REG_BASE: &'static str = r"\#define[\s*]+(?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:_?A?DDR)?[\s*]+0x([0-9a-fA-F]+)";
+pub const REG_DEF: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U|ADDR)[\s*]+\((?:DR_REG|REG|PERIPHS)_(.*)_BASE(?:_?A?DDR)? \+ (.*)\)";
+pub const REG_DEF_OFFSET: &'static str = r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:ADDRESS|U|ADDR)[\s*]+(?:0x)?([0-9a-fA-F]+)";
 pub const REG_DEF_INDEX: &'static str =
-    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U)\(i\)[\s*]+\((?:DR_REG|REG|PERIPHS)_([0-9A-Za-z_]+)_BASE(?:A?DDR)?[\s*]*\(i\) \+ (.*?)\)";
+    r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)_(?:REG|ADDRESS|U|ADDR)\(i\)[\s*]+\((?:DR_REG|REG|PERIPHS)_([0-9A-Za-z_]+)_BASE(?:_?A?DDR)?[\s*]*\(i\) \+ (.*?)\)";
 pub const REG_DEFINE_MASK: &'static str =
     r"\#define[\s*]+(?:PERIPHS_)?([^\s*]+)[\s*]+\(?(0x[0-9a-fA-F]+|[0-9]+|\(?BIT\(?[0-9]+\)?)\)?\)?";
 pub const REG_DEFINE_SHIFT: &'static str =
@@ -228,6 +232,11 @@ pub fn parse_idf(path: &str) -> HashMap<String, Peripheral> {
             let mut file_data = file_to_string(name);
             for (search, replace) in REPLACEMENTS {
                 file_data = file_data.replace(search, replace);
+            }
+
+            for (search, replace) in REPLACEMENTS_REGEX {
+                let re = Regex::new(search).unwrap();
+                file_data = re.replace_all(&file_data, *replace).to_string();
             }
 
             add_base_addr(&file_data, &mut peripherals);
