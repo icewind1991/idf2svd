@@ -32,10 +32,10 @@ fn decode_table(input: Table) -> Peripheral {
             reg.description = if row.description.is_empty() { reg.name.clone() } else { row.description.clone() };
         }
 
-        if row.bit_pos.is_some() && (row.ty.is_some() || !row.signal.is_empty()) {
+        if !row.signal.is_empty() && row.bit_pos.is_some() && (row.ty.is_some() || !row.signal.is_empty()) {
             // start of new bitfield
             let bit_field = BitField {
-                name: if row.signal.is_empty() { reg.name.to_lowercase() + "_data" } else { row.signal },
+                name: row.signal,
                 bits: row.bit_pos.unwrap(),
                 description: row.description,
                 reset_value: row.default.unwrap_or_default(),
