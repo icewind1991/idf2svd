@@ -29,7 +29,7 @@ fn decode_table(input: Table) -> Peripheral {
             reg.width = 32;
             reg.address = row.address.unwrap();
             reg.name = row.reg_name.trim_end_matches("_ADDRESS").to_string();
-            reg.description = row.description.clone();
+            reg.description = if row.description.is_empty() { reg.name.clone() } else { row.description.clone() };
         }
 
         if row.bit_pos.is_some() && (row.ty.is_some() || !row.signal.is_empty()) {
