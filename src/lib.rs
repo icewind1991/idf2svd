@@ -5,6 +5,11 @@ use std::io::prelude::*;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
+mod doc_input;
+mod doc_parse;
+
+pub use doc_parse::parse_doc;
+
 // make the header a bit more easy to handle
 const REPLACEMENTS: &'static [(&'static str, &'static str)] = &[
     ("PERIPHS_IO_MUX ", "PERIPHS_IO_MUX_BASE "),

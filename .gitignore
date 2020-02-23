@@ -1,3 +1,6 @@
 /target
 **/*.rs.bk
 *.svd
+*.json
+appendix.pdf
+tabula.jar

@@ -1,6 +1,6 @@
 pub const SOC_BASE_PATH: &'static str = "ESP8266_RTOS_SDK/components/esp8266/include/esp8266/";
 
-use header2svd::{parse_idf, Bits, Peripheral};
+use header2svd::{parse_idf, Bits, Peripheral, parse_doc};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -13,7 +13,30 @@ use svd_parser::{
 };
 
 fn main() {
-    let peripherals = parse_idf(SOC_BASE_PATH);
+    let mut peripherals = parse_idf(SOC_BASE_PATH);
+
+    // where available, the docs provide more detailed info
+    peripherals.iter_mut().for_each(|(name, peripheral)| {
+        match name.as_str() {
+            "TIMER" => {
+                let doc_peripheral = parse_doc("timer.json");
+                peripheral.registers = doc_peripheral.registers;
+            }
+            "UART" => {
+                let doc_peripheral = parse_doc("uart.json");
+                peripheral.registers = doc_peripheral.registers;
+            }
+            "GPIO" => {
+                let doc_peripheral = parse_doc("gpio.json");
+                peripheral.registers = doc_peripheral.registers;
+            }
+            "SPI" => {
+                let doc_peripheral = parse_doc("spi.json");
+                peripheral.registers = doc_peripheral.registers;
+            }
+            _ => {}
+        }
+    });
 
     let svd = create_svd(peripherals).unwrap();
 
@@ -89,6 +112,9 @@ fn create_svd(peripherals: HashMap<String, Peripheral>) -> Result<SvdDevice, ()>
 
         svd_peripherals.push(out);
     }
+
+    svd_peripherals.sort_by(|a, b| a.name.cmp(&b.name));
+
     println!("Len {}", svd_peripherals.len());
 
     let cpu = CpuBuilder::default()
