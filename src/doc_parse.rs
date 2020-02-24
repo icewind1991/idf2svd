@@ -18,6 +18,9 @@ fn decode_table(input: Table) -> Peripheral {
     let mut reg = Register::default();
     let mut last_type = Type::ReadWrite;
     for line in input.data {
+        if line[0].contains('~') {
+            continue;
+        }
         let row = extract_row(line, gpio_mode);
 
         if row.address.is_some() {
@@ -114,6 +117,9 @@ fn parse_addr(addr: &str) -> Option<u32> {
     if addr.is_empty() {
         return None;
     }
+    if addr.contains('~') {
+        return None;
+    }
     Some(u32::from_str_radix(&addr.trim_start_matches("0x"), 16).unwrap())
 }
 
@@ -138,6 +144,11 @@ fn parse_default(default: &str) -> Option<u32> {
     if default.is_empty() {
         return None;
     }
-    let default = default.split('\'').skip(1).next().unwrap();
-    Some(u32::from_str_radix(&default[1..], 16).unwrap())
+    let default = default.split('\'').skip(1).next().unwrap().replace('_', "");
+    Some(match &default[..1] {
+        "b" => u32::from_str_radix(&default[1..], 2).unwrap(),
+        "d" => u32::from_str_radix(&default[1..], 10).unwrap(),
+        "h" => u32::from_str_radix(&default[1..], 16).unwrap(),
+        _ => panic!("invalid default format")
+    })
 }

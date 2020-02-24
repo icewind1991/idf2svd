@@ -1,6 +1,6 @@
 pub const SOC_BASE_PATH: &'static str = "ESP8266_RTOS_SDK/components/esp8266/include/esp8266/";
 
-use header2svd::{parse_idf, Bits, Peripheral, parse_doc};
+use header2svd::{parse_idf, Bits, Peripheral, parse_doc, Register, BitField, Type};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -36,6 +36,29 @@ fn main() {
     uart_peripheral_1.address = 0x60000f00;
     peripherals.insert("UART0".to_string(), uart_peripheral_0);
     peripherals.insert("UART1".to_string(), uart_peripheral_1);
+
+    let mut spi = parse_doc("spi.json");
+    spi.address = 0x60000200;
+    for i in 0..16 {
+        spi.registers.push(Register {
+            name: format!("SPI_W{}", i),
+            address: 0x40 + (i * 32),
+            width: 32,
+            description: format!("the data inside the buffer of the SPI module, byte {}", i),
+            reset_value: 0,
+            bit_fields: vec![
+                BitField {
+                    name: format!("spi_w{}", i),
+                    bits: Bits::Range(0..=31),
+                    type_: Type::ReadWrite,
+                    reset_value: 0,
+                    description: format!("the data inside the buffer of the SPI module, byte {}", i),
+                },
+            ],
+            detailed_description: None,
+        })
+    }
+    peripherals.insert("SPI".to_string(), spi);
 
     let svd = create_svd(peripherals).unwrap();
 
