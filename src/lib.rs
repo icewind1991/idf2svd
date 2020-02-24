@@ -19,7 +19,6 @@ const REPLACEMENTS: &'static [(&'static str, &'static str)] = &[
     ("(0x60000000 + (i)*0xf00)", "0x60000000") // uart base address
 ];
 const REPLACEMENTS_REGEX: &'static [(&'static str, &'static str)] = &[
-    (r"(UART_(?:[^(]+))\(i\)", "${1}_ADDR"),
     (r"(I2S[^\s]+)[\s]+(\(REG_I2S_BASE \+ )", "${1}_REG $2"),
     (r"(SLC_[^\s]+)[\s]+(\(REG_SLC_BASE \+ )", "${1}_REG $2")
 ];

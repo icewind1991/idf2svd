@@ -22,21 +22,20 @@ fn main() {
                 let doc_peripheral = parse_doc("timer.json");
                 peripheral.registers = doc_peripheral.registers;
             }
-            "UART" => {
-                let doc_peripheral = parse_doc("uart.json");
-                peripheral.registers = doc_peripheral.registers;
-            }
             "GPIO" => {
                 let doc_peripheral = parse_doc("gpio.json");
-                peripheral.registers = doc_peripheral.registers;
-            }
-            "SPI" => {
-                let doc_peripheral = parse_doc("spi.json");
                 peripheral.registers = doc_peripheral.registers;
             }
             _ => {}
         }
     });
+
+    let mut uart_peripheral_0 = parse_doc("uart.json");
+    let mut uart_peripheral_1 = uart_peripheral_0.clone();
+    uart_peripheral_0.address = 0x60000000;
+    uart_peripheral_1.address = 0x60000f00;
+    peripherals.insert("UART0".to_string(), uart_peripheral_0);
+    peripherals.insert("UART1".to_string(), uart_peripheral_1);
 
     let svd = create_svd(peripherals).unwrap();
 
