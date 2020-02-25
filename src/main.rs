@@ -97,6 +97,7 @@ fn create_svd(peripherals: HashMap<String, Peripheral>) -> Result<SvdDevice, ()>
                     .name(field.name.clone())
                     .description(description)
                     .bit_range(bit_range)
+                    .access(Some(field.type_.into()))
                     .build()
                     .unwrap();
                 fields.push(Field::Single(field_out));
